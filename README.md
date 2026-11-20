@@ -93,6 +93,7 @@ For local testing you can use a tunnel: `npx localtunnel --port 3000` or `ngrok 
 Limits of the free plan:
 - **No persistent disk**: `data/state.json` (the "already DMed" record) is wiped on every restart or redeploy, so a person could get a second DM if they comment again afterwards.
 - The service **sleeps after about 15 minutes without traffic**; the first webhook after a sleep can be slow or delayed while it wakes up. Optional: a free cron service (for example cron-job.org) can request `https://YOUR-SERVICE.onrender.com/healthz` every 10 minutes to keep it awake. Free instance hours are limited, so check Render's current free-plan terms.
+- With `API_MODE=instagram_login` the token expires after 60 days on the free plan (the refreshed copy is wiped on restart). Unified login (the default, a never-expiring token) is recommended.
 - Changing `CAMPAIGNS_JSON` needs a restart (Render restarts automatically when you save env vars). `CAMPAIGNS_JSON`, if set, is used instead of `campaigns.json`.
 
 The public pages `/privacy`, `/data-deletion` and `/terms` use `OWNER_NAME` and `CONTACT_EMAIL`; the server logs a warning if they are missing.
@@ -121,6 +122,15 @@ if all retries fail, the comment is forgotten and the person can be DMed again i
 The exception is a timeout (or an unreadable reply from Instagram): the DM may have gone out anyway, so the person stays marked as DMed
 (no double DM), and the log shows a line starting with `ACTION NEEDED` so you can check Instagram and DM them manually if needed.
 Failures where the connection could not even be opened (e.g. no internet, DNS failure) are not treated this way; a dropped connection or timeout is. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
+
+## Handling a data-deletion request
+When someone asks (by email or DM, see `/data-deletion`) to have their data deleted, do this within 30 days:
+1. Run `node scripts/delete-user.js <instagram_username>` (on Render, in the service's Shell; locally, in this folder). It removes that person's comment records and their "already DMed" records, and prints what it removed. Records written by older versions hold only a numeric id; if you know the person's id, add it as a second argument.
+2. **Restart the server.** It keeps the data in memory and would write the old data back otherwise.
+3. The service's logs also contain usernames and comment text. They expire on the hosting provider's own schedule and cannot be edited by you; the privacy policy says so.
+4. Reply to the person to confirm.
+
+Automatic cleanup: comment records are removed after about 8 days and "already DMed" records after about 90 days (checked on start and every hour).
 
 ## Token
 Unified login: the token is a system-user token with the expiry you chose (**Never**). It cannot be refreshed; the server only logs that once at startup.

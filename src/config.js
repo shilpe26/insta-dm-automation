@@ -41,7 +41,13 @@ export const campaignsFromEnv = Boolean(process.env.CAMPAIGNS_JSON?.trim());
 
 /** Changes when the campaigns source changes. Env var: constant (nothing to reload). */
 export function campaignsVersion() {
-  return campaignsFromEnv ? 1 : fs.statSync(paths.campaigns).mtimeMs;
+  if (campaignsFromEnv) return 1;
+  try {
+    return fs.statSync(paths.campaigns).mtimeMs;
+  } catch (e) {
+    if (e.code === 'ENOENT') return -1; // loadCampaigns then throws the friendly "No campaigns file" message
+    throw e;
+  }
 }
 
 export const paths = {

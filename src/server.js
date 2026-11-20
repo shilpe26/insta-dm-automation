@@ -198,7 +198,7 @@ export async function handleComment(value) {
 
   // Mark comment AND user synchronously, before any await, so retries/concurrent webhooks can't double-send.
   store.markComment(commentId, { campaign: campaign.name, user: from.username, text });
-  if (campaign.oncePerUser) store.markUser(mediaId, from.id);
+  if (campaign.oncePerUser) store.markUser(mediaId, from.id, from.username);
   const dm = campaign.dm.replaceAll('{username}', from.username || '');
 
   // The webhook is already acked, so Meta won't redeliver: retry temporary failures ourselves.
@@ -261,6 +261,7 @@ export async function handleComment(value) {
 
 // ---------- HTTP server
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json({ verify: (req, _res, buf) => (req.rawBody = buf) }));
 
 registerPages(app);

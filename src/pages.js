@@ -48,13 +48,13 @@ const privacy = () => page('Privacy Policy', `
 <li>The commenter's Instagram user ID and username.</li>
 <li>The text and ID of the comment.</li>
 </ul>
-<p>We only process comments left on the posts or reels we have configured. We do not collect data from other posts, profiles or messages, and we do not ask for passwords.</p>
+<p>We only process comments left on the posts or reels we have configured. Comments on other posts are ignored and not stored. We do not read your profile or messages, and we do not ask for passwords.</p>
 
 <h2>Why we process it</h2>
 <p>Only to send the requested Direct Message once and to post a public reply to the comment. We do not use the data for anything else.</p>
 
 <h2>What we store</h2>
-<p>We keep a minimal record (comment IDs and user IDs, with the username and comment text) so that the same person does not receive duplicate messages. Comment records are automatically removed after about 8 days. The record is kept on our hosting server. It may also be cleared earlier when the server restarts or is redeployed.</p>
+<p>We keep a minimal record (comment IDs and user IDs, with the username and comment text) so that the same person does not receive duplicate messages. Comment records are automatically removed after about 8 days, and the records that tie a person to a post (used to avoid duplicate messages) after about 90 days. The records are kept on our hosting server. It may also be cleared earlier when the server restarts or is redeployed.</p>
 
 <h2>What we do not do</h2>
 <p>We do not sell or share your data, we do not use it for advertising, and we do not build profiles of people.</p>
@@ -62,14 +62,14 @@ const privacy = () => page('Privacy Policy', `
 <h2>Third parties</h2>
 <ul>
 <li><strong>Meta Platforms (Instagram)</strong>: the comment and message data passes through Meta's platform, which has its own privacy policy.</li>
-<li><strong>Our hosting provider</strong>: the service runs on a hosting provider's servers, which store the minimal record described above.</li>
+<li><strong>Our hosting provider</strong>: the service runs on a hosting provider's servers, which store the minimal record described above. The service's operational logs also contain the commenter's username and comment text; the hosting provider keeps these logs for its own log retention period, which we do not control.</li>
 </ul>
 
 <h2>Retention</h2>
-<p>Comment records are deleted after about 8 days. Records tying a person to a post (used to avoid sending the same message twice) are kept until deleted on request or until the server data is reset.</p>
+<p>Comment records are deleted after about 8 days. Records tying a person to a post (used to avoid sending the same message twice) are deleted after about 90 days, or earlier on request or when the server data is reset. Operational logs at our hosting provider expire on the provider's own schedule.</p>
 
 <h2>Your rights</h2>
-<p>You can ask us what data we hold about you, ask us to correct it, or ask us to delete it. You can also stop the automation from contacting you by not commenting on the configured posts, and you can remove the app's access from your Instagram settings.</p>
+<p>You can ask us what data we hold about you, ask us to correct it, or ask us to delete it. You can also stop the automation from contacting you by not commenting on the configured posts, or by blocking or restricting the account that operates this service.</p>
 
 <h2>How to request deletion</h2>
 <p>See our <a href="/data-deletion">data deletion instructions</a>.</p>
@@ -89,15 +89,10 @@ const deletion = () => page('Data Deletion Instructions', `
 <p>Send a Direct Message to the Instagram account that operates this service (run by ${ownerHtml()}) asking for your data to be deleted.</p>
 
 <h2>Timing</h2>
-<p>We will delete your data within 30 days of your request.</p>
+<p>We will delete your data within 30 days of your request. Operational logs held by our hosting provider expire on the provider's own schedule.</p>
 
-<h2>Remove the app's access from your Instagram account</h2>
-<p>If you have connected this app to your own Instagram account, you can also remove it yourself:</p>
-<ol>
-<li>Open Instagram and go to <strong>Settings</strong>.</li>
-<li>Open <strong>Apps and websites</strong> (it may be under "Website permissions" or "Apps and websites" depending on your version).</li>
-<li>Find this app and choose <strong>Remove</strong>.</li>
-</ol>
+<h2>Stop further messages</h2>
+<p>You do not need to connect or authorize anything to receive a message, so there is no app to remove from your Instagram settings. To stop further messages, you can block or restrict the Instagram account that operates this service, and you can ask us to delete your data using either option above.</p>
 <p>See also our <a href="/privacy">Privacy Policy</a>.</p>
 `);
 
@@ -132,7 +127,10 @@ const home = () => page('Instagram comment-to-DM automation', `
 `);
 
 export function registerPages(app) {
-  const html = (fn) => (_req, res) => res.type('html').send(fn());
+  const html = (fn) => (_req, res) => {
+    res.set({ 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
+    res.type('html').send(fn());
+  };
   app.get('/', html(home));
   app.get('/privacy', html(privacy));
   app.get('/data-deletion', html(deletion));

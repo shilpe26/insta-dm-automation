@@ -21,6 +21,8 @@ This guide helps you ask Meta for "advanced access" so the bot works for **every
 Also fill in the **Data use checkup / data handling** questions honestly: the bot stores only comment and user IDs (plus username and comment text) on the hosting server, shares nothing, and deletes comment records after about 8 days.
 
 ## 2. Permissions to request
+> **Caveat:** the permission names below are for **Instagram API with Unified Login** (the default, `API_MODE=unified`). If you run `API_MODE=instagram_login` the names are different: `instagram_business_basic`, `instagram_business_manage_comments` and `instagram_business_manage_messages` (no `business_management`). Use the same explanations for them.
+
 In **App Review > Permissions and Features**, request advanced access for each item below. Paste the matching text into "How will you use this permission?". Edit the text so it is true for your account.
 
 **instagram_basic**
@@ -36,6 +38,15 @@ In **App Review > Permissions and Features**, request advanced access for each i
 > Our app uses a system-user access token that belongs to the account owner's business portfolio. This permission lets the app access the Instagram account assigned to that business so it can receive webhooks and perform the actions described for the other permissions. We do not read or change other business assets.
 
 Under "Platform settings / webhooks" also confirm the webhook field **comments** is subscribed.
+
+### Exact setup steps (the flow we used)
+1. Your business portfolio is connected to the app, and your Instagram professional account is in that portfolio.
+2. In the app: **Instagram > API setup with Unified login > Create configuration**. Pick the template, set the token to never expire, choose your Instagram account.
+3. Add your test account as a tester: **App roles > Roles > Add people > Instagram Tester**. The tester accepts at `instagram.com/accounts/manage_access/` under **Tester invites**.
+4. Click **Generate token** and put it in `IG_ACCESS_TOKEN`.
+5. **Configure webhooks**: enter the callback URL (`https://YOUR-HOST/webhook`) and the verify token, then **Verify and save**.
+6. Then, as a separate step, switch the **comments** field to **Subscribed**. Verifying alone subscribes nothing.
+7. Turn on the account's **Webhook Subscription** toggle (in the account list in API setup). Without it no comment notifications arrive.
 
 ## 3. Screencast (screen recording)
 Record one continuous video (about 3 to 5 minutes, English or with English captions, clear resolution). Narrate or add text on screen. Suggested script:
