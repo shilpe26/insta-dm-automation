@@ -28,6 +28,11 @@ if (!UNIFIED) try {
 // Instagram/Graph rate-limit error codes.
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 
+// Error codes meaning the connection could not even be opened, so the request never reached Meta.
+const NEVER_SENT_CODES = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT',
+]);
+
 /** `path` is an API path, or a full URL (used for pagination links). */
 async function call(method, path, { query = {}, body, detectAlreadySent = false } = {}) {
   const url = new URL(path.startsWith('http') ? path : BASE + path);
@@ -49,9 +54,11 @@ async function call(method, path, { query = {}, body, detectAlreadySent = false 
     // Network failures are temporary, so retryable.
     const err = new Error(`Instagram API ${label} network error: ${e.message}`);
     err.retryable = true;
-    // Only a timeout leaves the outcome unknown (the request may have reached Instagram).
-    // Connection refused / DNS failures mean it never got there, so they are not ambiguous.
-    err.ambiguous = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+    // Ambiguous (the request may have reached Instagram) unless the error, or something in its cause
+    // chain, proves the connection could never be opened. Timeouts, resets and unknown errors stay ambiguous.
+    let never = false;
+    for (let c = e, i = 0; c && i < 5 && !never; c = c.cause, i++) never = NEVER_SENT_CODES.has(c.code);
+    err.ambiguous = !never;
     throw err;
   }
   let data;

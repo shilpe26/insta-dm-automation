@@ -104,7 +104,7 @@ If a DM fails with a temporary error (Instagram outage, rate limit, network), th
 if all retries fail, the comment is forgotten and the person can be DMed again if they comment again.
 The exception is a timeout (or an unreadable reply from Instagram): the DM may have gone out anyway, so the person stays marked as DMed
 (no double DM), and the log shows a line starting with `ACTION NEEDED` so you can check Instagram and DM them manually if needed.
-Connection failures where the request never reached Instagram are not treated this way. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
+Failures where the connection could not even be opened (e.g. no internet, DNS failure) are not treated this way; a dropped connection or timeout is. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
 
 ## Token
 Unified login: the token is a system-user token with the expiry you chose (**Never**). It cannot be refreshed; the server only logs that once at startup.
