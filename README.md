@@ -122,6 +122,8 @@ if all retries fail, the comment is forgotten and the person can be DMed again i
 The exception is a timeout (or an unreadable reply from Instagram): the DM may have gone out anyway, so the person stays marked as DMed
 (no double DM), and the log shows a line starting with `ACTION NEEDED` so you can check Instagram and DM them manually if needed.
 Failures where the connection could not even be opened (e.g. no internet, DNS failure) are not treated this way; a dropped connection or timeout is. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
+The public "Check your DM" reply is retried the same way (same delays, in the background) when it fails with a temporary error; permanent errors are not retried.
+If an attempt was inconclusive (timeout etc.), the server first looks for its own reply under the comment and does not post a second one; if it cannot check, it gives up and logs `ACTION NEEDED: could not confirm public reply ...`.
 
 ## Handling a data-deletion request
 When someone asks (by email or DM, see `/data-deletion`) to have their data deleted, do this within 30 days:

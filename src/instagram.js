@@ -146,6 +146,26 @@ export const ig = {
     return call('POST', `/${commentId}/replies`, { body: { message } });
   },
 
+  /** Replies under a comment (first page(s)), used to see whether our own public reply already exists. */
+  async listReplies(commentId) {
+    const out = [];
+    let fields = 'id,username,from';
+    let page;
+    try {
+      page = await call('GET', `/${commentId}/replies`, { query: { fields } });
+    } catch (e) {
+      if (e.retryable || e.status === undefined) throw e;
+      fields = 'id,text,username'; // this API version may not expose `from`
+      page = await call('GET', `/${commentId}/replies`, { query: { fields } });
+    }
+    for (let i = 0; page && i < 5; i++) {
+      out.push(...(page.data || []));
+      if (!page.paging?.next) break;
+      page = await call('GET', page.paging.next);
+    }
+    return out;
+  },
+
   /**
    * "Private reply": a DM to the person who wrote the comment.
    * Instagram allows ONE private reply per comment, within 7 days of the comment.
