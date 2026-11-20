@@ -1,0 +1,19 @@
+{
+  "name": "insta-dm-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Auto-reply to Instagram reel comments with 'Check your DM' and send the commenter a private DM.",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "list-reels": "node scripts/list-reels.js",
+    "simulate": "node scripts/simulate-comment.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "campaigns": [
+    {
+      "name": "Free guide reel",
+      "reel": "https://www.instagram.com/reel/REPLACE_ME/",
+      "keywords": [],
+      "oncePerUser": true,
+      "publicReplies": [
+        "Check your DM 📩",
+        "Sent! Check your DMs ✨",
+        "Just sent it to your DM 🙌"
+      ],
+      "dm": "Hey @{username}! 👋 Thanks for commenting. Here's the link I promised: https://example.com/your-link"
+    }
+  ]
+}
