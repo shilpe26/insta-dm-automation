@@ -11,7 +11,8 @@ const port = process.env.PORT || 3000;
 const body = JSON.stringify({
   object: 'instagram',
   entry: [{
-    id: process.env.IG_USER_ID || '0',
+    // Placeholder when IG_USER_ID is unset; the server ignores entry ids that differ from IG_USER_ID, and a made-up id is harmless otherwise.
+    id: process.env.IG_USER_ID || 'SIM_IG',
     time: Math.floor(Date.now() / 1000),
     changes: [{
       field: 'comments',

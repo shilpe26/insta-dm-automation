@@ -40,7 +40,10 @@ New Meta apps use **"Instagram API with Unified Login"** (this is the default, `
    - Permissions: `instagram_basic`, `instagram_manage_comments`, `instagram_manage_messages` and `business_management`
 4. **Generate token** and copy it → `IG_ACCESS_TOKEN`. This is a system-user token: it is not refreshed by the server.
 5. **App settings → Basic**: copy the **App secret** → `APP_SECRET` (the old name `INSTAGRAM_APP_SECRET` still works).
-6. In the Instagram app: **Settings → Privacy → Messages → Connected tools → turn on "Allow access to messages"**.
+6. **Subscribe the account to the app's webhooks.** After generating the token, open **Configure webhooks** (step 4 below) and make sure
+   your Instagram account is subscribed and the **`comments`** field is on. If the dashboard shows a per-account subscribe toggle, turn it on;
+   without it Meta sends no comment notifications for that account.
+7. In the Instagram app: **Settings → Privacy → Messages → Connected tools → turn on "Allow access to messages"**.
 
 `IG_USER_ID` can stay empty if exactly one Instagram account is assigned to the token: the server finds it at startup and logs its id.
 If several accounts are assigned, `npm run list-reels` prints them; set `IG_USER_ID` to the one you want.
@@ -94,7 +97,7 @@ DRY_RUN=true npm start
 npm run simulate -- <mediaId-from-campaigns.json> "🔥" some_user
 ```
 The server logs what it *would* send (lines start with `[dry-run]`). Optional extras: a 4th argument is a
-`parentId` (simulates a thread reply, which is ignored), and `SIM_FROM_ID=<id>` overrides the commenter id.
+`parentId` (simulates a thread reply, which is ignored), and `SIM_FROM_ID=<id>` overrides the commenter id. If `IG_USER_ID` is not set, the fake webhook uses the placeholder account id `SIM_IG`.
 Only run `simulate` against a `DRY_RUN=true` server. Note that simulate still writes to `data/state.json`.
 The person is marked as DMed *before* the DM is sent, so a crash mid-send won't double-DM but may skip that person.
 If a DM fails with a temporary error (Instagram outage, rate limit, network), the server retries in-process after 30 s, 2 min and 10 min;

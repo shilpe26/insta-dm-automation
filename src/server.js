@@ -20,6 +20,8 @@ const ownIds = new Set([env.igUserId].filter(Boolean));
 let ownUsername = '';
 // True only when own ids came from IG_USER_ID or a successful /me call (entry.id alone is not trusted enough).
 let ownVerified = Boolean(env.igUserId);
+// True once the username lookup succeeded (needed to spot our own comments by name).
+let usernameLoaded = false;
 let lastMeTry = 0;
 const ME_RETRY_MS = 60 * 1000;
 
@@ -28,6 +30,7 @@ async function loadOwnAccount() {
   const me = await ig.me();
   for (const id of [me.id, me.user_id]) if (id) ownIds.add(String(id));
   ownUsername = (me.username || '').toLowerCase();
+  usernameLoaded = true;
   ownVerified = true;
   log(`Logged in as @${me.username} (ids: ${[...ownIds].join(', ')})`);
 }
@@ -50,6 +53,7 @@ async function loadOwnAccountUnified() {
   const acct = await ig.account(id); // if this fails we stay unverified (unless IG_USER_ID was given)
   if (acct.id) ownIds.add(String(acct.id));
   ownUsername = (acct.username || '').toLowerCase();
+  usernameLoaded = true;
   ownVerified = true;
   log(`Instagram account @${acct.username} (id: ${id})`);
 }
@@ -59,9 +63,12 @@ async function loadOwnAccountUnified() {
 let ownInflight = null;
 function ensureOwnAccount() {
   if (ownInflight) return ownInflight;
-  if (env.dryRun || ownVerified) return Promise.resolve();
+  // Dry run skips lookups, except unified mode needs the account id (to list reels) while it is still unknown.
+  if (env.dryRun && !(env.apiMode === 'unified' && !ig.getIgId())) return Promise.resolve();
+  if (ownVerified && usernameLoaded) return Promise.resolve();
   if (Date.now() - lastMeTry < ME_RETRY_MS) return Promise.resolve();
   lastMeTry = Date.now();
+  if (ownVerified) log('WARNING Own username not loaded yet; retrying the lookup (comments are matched by id only until then).');
   ownInflight = loadOwnAccount()
     .catch((e) => log('WARNING Could not verify own account:', e.message))
     .finally(() => { ownInflight = null; });
@@ -69,8 +76,11 @@ function ensureOwnAccount() {
 }
 
 // Delays before retry 1, 2, 3 of a failed DM. Override with RETRY_DELAYS_MS="200,200,200" (e.g. for tests).
-const RETRY_DELAYS_MS = (process.env.RETRY_DELAYS_MS || '30000,120000,600000')
-  .split(',').map((n) => n.trim()).filter((n) => n !== '').map(Number).filter((n) => Number.isFinite(n) && n >= 0);
+const retryParts = (process.env.RETRY_DELAYS_MS || '30000,120000,600000').split(',').map((n) => n.trim()).filter((n) => n !== '');
+const RETRY_DELAYS_MS = retryParts.map(Number).filter((n) => Number.isFinite(n) && n >= 0);
+if (RETRY_DELAYS_MS.length !== retryParts.length) {
+  log(`WARNING RETRY_DELAYS_MS contains non-numeric or negative parts; ignoring them (using: ${RETRY_DELAYS_MS.join(',') || 'no retries'})`);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Concurrent callers await the same lookup instead of returning early with an empty map.
@@ -122,11 +132,27 @@ async function resolveCampaigns(mtime) {
     map.set(String(id), c);
     log(`Watching "${c.name}" -> media ${id}`);
   }
+  if (!allResolved) {
+    // Keep what we already knew for campaigns that didn't resolve this time (same name + same reel),
+    // so a partial or empty media list never drops a reel we were watching.
+    for (const c of campaigns) {
+      if (c.mediaId || [...map.values()].includes(c)) continue;
+      for (const [oldId, old] of byMediaId) {
+        if (old.name === c.name && old.reel === c.reel && !map.has(oldId)) {
+          map.set(oldId, c);
+          log(`Keeping previous media ${oldId} for "${c.name}"`);
+          break;
+        }
+      }
+    }
+  }
   byMediaId = map;
   if (allResolved) campaignsMtime = mtime;
 }
 
 // ---------- Core logic for one comment
+// Second comments that arrived while the user's first DM was still pending (in memory only), keyed by media:user.
+const heldComments = new Map();
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -157,6 +183,11 @@ export async function handleComment(value) {
   if (campaign.oncePerUser && store.userAlreadyDmed(mediaId, from.id)) {
     if (store.userPending(mediaId, from.id)) {
       // Their first DM is still being sent (or retried). Don't mark this comment, so it isn't skipped for good.
+      // Remember it: if the first DM ends up failing, the newest held comment is replayed.
+      const key = `${mediaId}:${from.id}`;
+      const list = heldComments.get(key) || [];
+      list.push(value);
+      heldComments.set(key, list.slice(-20));
       log(`hold @${from.username}: first DM for "${campaign.name}" still pending, leaving this comment unmarked`);
       return;
     }
@@ -172,22 +203,47 @@ export async function handleComment(value) {
 
   // The webhook is already acked, so Meta won't redeliver: retry temporary failures ourselves.
   // Comment and user stay marked while retrying so nothing double-sends.
+  const heldKey = `${mediaId}:${from.id}`;
+  let ambiguous = false; // an attempt timed out / hit a network error: the DM may have gone out anyway
   for (let attempt = 0; ; attempt++) {
     try {
       await ig.sendPrivateReply(commentId, dm);
       if (campaign.oncePerUser) store.finishUser(mediaId, from.id);
+      heldComments.delete(heldKey);
       break;
     } catch (e) {
+      if (e.alreadySent) {
+        // Instagram says this comment already got its private reply: treat as delivered.
+        log(`DM to @${from.username}: Instagram reports the private reply was already sent, treating as delivered`);
+        if (campaign.oncePerUser) store.finishUser(mediaId, from.id);
+        heldComments.delete(heldKey);
+        break;
+      }
+      if (e.network) ambiguous = true;
       const delay = RETRY_DELAYS_MS[attempt];
       if (e.retryable && delay !== undefined) {
         log(`DM to @${from.username} failed (attempt ${attempt + 1}), retrying in ${delay >= 1000 ? Math.round(delay / 1000) + 's' : delay + 'ms'}:`, e.message);
         await sleep(delay);
         continue;
       }
+      log(`DM to @${from.username} failed${e.retryable ? ` after ${attempt + 1} attempts, giving up` : ''}:`, e.message, e.details ? JSON.stringify(e.details) : '');
+      if (ambiguous) {
+        // Fail closed against double-DMs: keep the person and comment marked, and don't replay held comments.
+        log(`WARNING @${from.username} may already have received the DM (an earlier attempt timed out); keeping them marked as DMed`);
+        if (campaign.oncePerUser) store.finishUser(mediaId, from.id);
+        heldComments.delete(heldKey);
+        return;
+      }
       if (campaign.oncePerUser) store.unmarkUser(mediaId, from.id);
       if (e.retryable) store.unmarkComment(commentId); // gave up; a future redelivery may try again
       else store.markComment(commentId, { campaign: campaign.name, user: from.username, text, error: e.message });
-      log(`DM to @${from.username} failed${e.retryable ? ` after ${attempt + 1} attempts, giving up` : ''}:`, e.message, e.details ? JSON.stringify(e.details) : '');
+      // Person is unmarked now: give their newest held comment its own chance.
+      const held = heldComments.get(heldKey);
+      heldComments.delete(heldKey);
+      if (held?.length) {
+        log(`Replaying the newest held comment from @${from.username}`);
+        await handleComment(held[held.length - 1]);
+      }
       return; // no public "Check your DM" if no DM went out
     }
   }
@@ -245,7 +301,8 @@ app.post('/webhook', async (req, res) => {
     }
     const jobs = [];
     for (const entry of req.body?.entry || []) {
-      if (entry.id) ownIds.add(String(entry.id)); // webhook entries are addressed to our own account
+      // Webhook entries are addressed to our own account; only trust the id if it can't contradict IG_USER_ID.
+      if (entry.id && (!env.igUserId || String(entry.id) === env.igUserId)) ownIds.add(String(entry.id));
       for (const change of entry.changes || []) {
         if ((change.field === 'comments' || change.field === 'live_comments') && change.value) {
           // Not awaited one by one: a comment waiting to retry its DM must not hold up the others.
@@ -272,8 +329,7 @@ async function start() {
   // Dry run skips API calls, except that unified mode needs the account id to look up reels (best effort).
   if (!env.dryRun || (unified && !env.igUserId)) {
     try {
-      lastMeTry = Date.now();
-      await loadOwnAccount();
+      await loadOwnAccount(); // lastMeTry stays 0 so the first webhook after a failed startup retries at once
     } catch (e) {
       log('WARNING Could not verify access token / account:', e.message);
     }

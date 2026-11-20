@@ -49,9 +49,24 @@ async function call(method, path, { query = {}, body } = {}) {
     // Includes timeouts (TimeoutError): temporary, so retryable.
     const err = new Error(`Instagram API ${label} network error: ${e.message}`);
     err.retryable = true;
+    err.network = true; // outcome unknown: the request may have reached Instagram
     throw err;
   }
-  const data = await res.json().catch(() => ({}));
+  let data;
+  try {
+    const raw = await res.text();
+    // A POST may legitimately come back empty; a GET (and any non-empty body) must be valid JSON.
+    data = raw.trim() === '' && method !== 'GET' ? {} : JSON.parse(raw);
+  } catch (e) {
+    if (!res.ok) data = {}; // error status: the status code below is enough
+    else {
+      // 200 but unreadable body (or body read timed out): don't pretend it worked with {}.
+      const err = new Error(`Instagram API ${label} returned an unreadable response: ${e.message}`);
+      err.retryable = true;
+      err.network = true;
+      throw err;
+    }
+  }
   if (!res.ok || data.error) {
     const err = new Error(`Instagram API ${label} failed: ${data.error?.message || res.status}`);
     err.details = data.error;
@@ -60,6 +75,10 @@ async function call(method, path, { query = {}, body } = {}) {
     const code = data.error?.code;
     err.retryable =
       res.status >= 500 || res.status === 429 || RATE_LIMIT_CODES.has(code) || code === 2 || data.error?.is_transient === true;
+    // Assumption: Meta signals "this comment already got its private reply" with subcode 1545041 or similar wording.
+    const msg = String(data.error?.message || '');
+    err.alreadySent =
+      data.error?.error_subcode === 1545041 || /already\b.*\b(replied|sent|private reply)|private reply.*already/i.test(msg);
     throw err;
   }
   return data;
