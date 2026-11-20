@@ -25,7 +25,9 @@ const body = JSON.stringify({
     }],
   }],
 });
-const sig = 'sha256=' + crypto.createHmac('sha256', process.env.INSTAGRAM_APP_SECRET).update(body).digest('hex');
+const secret = process.env.APP_SECRET || process.env.INSTAGRAM_APP_SECRET;
+if (!secret) throw new Error('Set APP_SECRET in .env');
+const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 const res = await fetch(`http://localhost:${port}/webhook`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sig },

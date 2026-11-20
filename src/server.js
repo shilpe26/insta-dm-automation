@@ -24,6 +24,7 @@ let lastMeTry = 0;
 const ME_RETRY_MS = 60 * 1000;
 
 async function loadOwnAccount() {
+  if (env.apiMode === 'unified') return loadOwnAccountUnified();
   const me = await ig.me();
   for (const id of [me.id, me.user_id]) if (id) ownIds.add(String(id));
   ownUsername = (me.username || '').toLowerCase();
@@ -31,25 +32,62 @@ async function loadOwnAccount() {
   log(`Logged in as @${me.username} (ids: ${[...ownIds].join(', ')})`);
 }
 
-// Fail closed: if our identity is unknown, retry /me (at most once a minute) and otherwise refuse to act.
-async function ensureOwnAccount() {
-  if (env.dryRun || ownVerified) return;
-  if (Date.now() - lastMeTry < ME_RETRY_MS) return;
+// Unified login: /me is the system user, so the Instagram account comes from IG_USER_ID or /me/assigned_instagram_accounts.
+async function loadOwnAccountUnified() {
+  let id = env.igUserId;
+  if (!id) {
+    const accounts = await ig.assignedAccounts();
+    if (accounts.length === 0) throw new Error('No Instagram accounts are assigned to this token (assign one in the system-user configuration)');
+    if (accounts.length > 1) {
+      log(`Several Instagram accounts are assigned to this token; set IG_USER_ID to one of: ${accounts.map((a) => `${a.id} (@${a.username})`).join(', ')}`);
+      throw new Error('IG_USER_ID is required when several Instagram accounts are assigned');
+    }
+    id = String(accounts[0].id);
+    log(`Using the only assigned Instagram account: ${id} (@${accounts[0].username})`);
+  }
+  ig.setIgId(id);
+  ownIds.add(id);
+  const acct = await ig.account(id); // if this fails we stay unverified (unless IG_USER_ID was given)
+  if (acct.id) ownIds.add(String(acct.id));
+  ownUsername = (acct.username || '').toLowerCase();
+  ownVerified = true;
+  log(`Instagram account @${acct.username} (id: ${id})`);
+}
+
+// Fail closed: if our identity is unknown, retry (at most once a minute) and otherwise refuse to act.
+// Concurrent callers share one in-flight lookup.
+let ownInflight = null;
+function ensureOwnAccount() {
+  if (ownInflight) return ownInflight;
+  if (env.dryRun || ownVerified) return Promise.resolve();
+  if (Date.now() - lastMeTry < ME_RETRY_MS) return Promise.resolve();
   lastMeTry = Date.now();
-  await loadOwnAccount().catch((e) => log('WARNING Could not verify own account:', e.message));
+  ownInflight = loadOwnAccount()
+    .catch((e) => log('WARNING Could not verify own account:', e.message))
+    .finally(() => { ownInflight = null; });
+  return ownInflight;
 }
 
 // Delays before retry 1, 2, 3 of a failed DM. Override with RETRY_DELAYS_MS="200,200,200" (e.g. for tests).
 const RETRY_DELAYS_MS = (process.env.RETRY_DELAYS_MS || '30000,120000,600000')
-  .split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+  .split(',').map((n) => n.trim()).filter((n) => n !== '').map(Number).filter((n) => Number.isFinite(n) && n >= 0);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function refreshCampaigns() {
+// Concurrent callers await the same lookup instead of returning early with an empty map.
+// If it fails, byMediaId keeps the last good map (it is only replaced on success).
+let campaignsInflight = null;
+function refreshCampaigns() {
+  if (campaignsInflight) return campaignsInflight;
+  campaignsInflight = refreshCampaignsOnce().finally(() => { campaignsInflight = null; });
+  return campaignsInflight;
+}
+
+async function refreshCampaignsOnce() {
   const mtime = fs.statSync(paths.campaigns).mtimeMs;
   if (mtime === campaignsMtime) return;
   // File unchanged but some reels were not found: retry at most every 5 minutes.
   if (mtime === triedMtime && Date.now() - lastTry < RETRY_UNRESOLVED_MS) return;
-  triedMtime = mtime; // set before any await so concurrent webhooks don't repeat the lookup
+  triedMtime = mtime;
   lastTry = Date.now();
   try {
     await resolveCampaigns(mtime);
@@ -117,6 +155,11 @@ export async function handleComment(value) {
     return;
   }
   if (campaign.oncePerUser && store.userAlreadyDmed(mediaId, from.id)) {
+    if (store.userPending(mediaId, from.id)) {
+      // Their first DM is still being sent (or retried). Don't mark this comment, so it isn't skipped for good.
+      log(`hold @${from.username}: first DM for "${campaign.name}" still pending, leaving this comment unmarked`);
+      return;
+    }
     store.markComment(commentId, { skipped: 'already-dmed', user: from.username });
     log(`skip @${from.username}: already DMed for "${campaign.name}"`);
     return;
@@ -132,6 +175,7 @@ export async function handleComment(value) {
   for (let attempt = 0; ; attempt++) {
     try {
       await ig.sendPrivateReply(commentId, dm);
+      if (campaign.oncePerUser) store.finishUser(mediaId, from.id);
       break;
     } catch (e) {
       const delay = RETRY_DELAYS_MS[attempt];
@@ -193,23 +237,26 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200); // answer Meta quickly, then do the work
 
   try {
-    await refreshCampaigns();
-  } catch (e) {
-    log('Could not load campaigns:', e.message);
-    return;
-  }
-  await ensureOwnAccount();
-  const jobs = [];
-  for (const entry of req.body.entry || []) {
-    if (entry.id) ownIds.add(String(entry.id)); // webhook entries are addressed to our own account
-    for (const change of entry.changes || []) {
-      if (change.field === 'comments' || change.field === 'live_comments') {
-        // Not awaited one by one: a comment waiting to retry its DM must not hold up the others.
-        jobs.push(handleComment(change.value).catch((e) => log('handleComment error:', e.message)));
+    await ensureOwnAccount(); // first: in unified mode the media lookup needs the account id
+    try {
+      await refreshCampaigns();
+    } catch (e) {
+      log('Could not reload campaigns (using the last good list):', e.message);
+    }
+    const jobs = [];
+    for (const entry of req.body?.entry || []) {
+      if (entry.id) ownIds.add(String(entry.id)); // webhook entries are addressed to our own account
+      for (const change of entry.changes || []) {
+        if ((change.field === 'comments' || change.field === 'live_comments') && change.value) {
+          // Not awaited one by one: a comment waiting to retry its DM must not hold up the others.
+          jobs.push(handleComment(change.value).catch((e) => log('handleComment error:', e.message)));
+        }
       }
     }
+    await Promise.all(jobs);
+  } catch (e) {
+    log('Webhook processing error:', e.message);
   }
-  await Promise.all(jobs);
 });
 
 // Malformed JSON etc.: plain short answer, no stack trace.
@@ -220,14 +267,21 @@ app.use((err, _req, res, _next) => {
 
 // ---------- Startup
 async function start() {
-  if (!env.dryRun) {
+  const unified = env.apiMode === 'unified';
+  if (unified) ig.setIgId(env.igUserId);
+  // Dry run skips API calls, except that unified mode needs the account id to look up reels (best effort).
+  if (!env.dryRun || (unified && !env.igUserId)) {
     try {
       lastMeTry = Date.now();
       await loadOwnAccount();
     } catch (e) {
-      log('WARNING Could not verify access token:', e.message);
+      log('WARNING Could not verify access token / account:', e.message);
     }
-    if (!ownVerified) log('ERROR Own account id unknown (set IG_USER_ID); comments will be ignored until it is known.');
+    if (!ownVerified && !env.dryRun) log('ERROR Own account id unknown (set IG_USER_ID); comments will be ignored until it is known.');
+  }
+  if (unified) {
+    log('Unified login: the token is a system-user token (not refreshable); no automatic refresh.');
+  } else if (!env.dryRun) {
     // Refresh the long-lived token shortly after startup, then once a day so it never expires.
     const refresh = () => ig.refreshToken().then(() => log('Access token refreshed')).catch((e) => log(e.message));
     setTimeout(refresh, 60 * 1000).unref();

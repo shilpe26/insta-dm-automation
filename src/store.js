@@ -22,7 +22,12 @@ function save() {
   writeJsonAtomic(paths.state, state);
 }
 
+// Users whose DM is currently being sent/retried (in memory only; not needed across restarts).
+const pendingUsers = new Set();
+
 export const store = {
+  userPending: (mediaId, userId) => pendingUsers.has(`${mediaId}:${userId}`),
+  finishUser: (mediaId, userId) => pendingUsers.delete(`${mediaId}:${userId}`),
   seenComment: (id) => Boolean(state.comments[id]),
   markComment(id, info) {
     state.comments[id] = { ...info, at: new Date().toISOString() };
@@ -35,10 +40,12 @@ export const store = {
   userAlreadyDmed: (mediaId, userId) => Boolean(state.users[`${mediaId}:${userId}`]),
   markUser(mediaId, userId) {
     state.users[`${mediaId}:${userId}`] = new Date().toISOString();
+    pendingUsers.add(`${mediaId}:${userId}`);
     save();
   },
   unmarkUser(mediaId, userId) {
     delete state.users[`${mediaId}:${userId}`];
+    pendingUsers.delete(`${mediaId}:${userId}`);
     save();
   },
 };

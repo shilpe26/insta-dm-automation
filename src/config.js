@@ -11,13 +11,26 @@ function required(name) {
   return v;
 }
 
+// "unified" = Instagram API with Unified Login (graph.facebook.com, system-user token).
+// "instagram_login" = Instagram API with Instagram Login (graph.instagram.com, IGAA... token).
+const apiMode = process.env.API_MODE || 'unified';
+if (!['unified', 'instagram_login'].includes(apiMode)) {
+  throw new Error(`API_MODE must be "unified" or "instagram_login" (got "${apiMode}")`);
+}
+
+// The webhook signature secret is the Meta APP SECRET (App settings > Basic).
+// INSTAGRAM_APP_SECRET is the old name, still accepted.
+const appSecret = process.env.APP_SECRET || process.env.INSTAGRAM_APP_SECRET;
+if (!appSecret) throw new Error('Missing required env var APP_SECRET (see .env.example)');
+
 export const env = {
-  appSecret: required('INSTAGRAM_APP_SECRET'),
+  apiMode,
+  appSecret,
   accessToken: required('IG_ACCESS_TOKEN'),
   igUserId: process.env.IG_USER_ID || '',
   verifyToken: required('WEBHOOK_VERIFY_TOKEN'),
   port: Number(process.env.PORT || 3000),
-  graphVersion: process.env.GRAPH_VERSION || 'v23.0',
+  graphVersion: process.env.GRAPH_VERSION || (apiMode === 'unified' ? 'v27.0' : 'v23.0'),
   dryRun: process.env.DRY_RUN === 'true',
 };
 
