@@ -1,8 +1,10 @@
 # Instagram Comment → DM Automation
 
 Someone comments **anything** (a word, an emoji, "link") on a reel you choose →
-1. the bot replies publicly under their comment: **"Check your DM 📩"**
-2. the bot sends them a **DM** with the message you wrote (e.g. your link).
+1. the bot sends them a **DM** with the message you wrote (e.g. your link).
+2. only if the DM went out, the bot replies publicly under their comment: **"Check your DM 📩"**
+
+Only top-level comments trigger this. Replies inside a comment thread, and your own comments, are ignored.
 
 It uses Instagram's official API ("private replies"), so your account is not at risk of a ban for automation.
 
@@ -12,9 +14,10 @@ It uses Instagram's official API ("private replies"), so your account is not at 
 Someone comments on your reel
         │
 Instagram sends a webhook ──▶ this server (/webhook)
-                                 │ is it a reel in campaigns.json? not your own comment? not already DMed?
+                                 │ is it a reel in campaigns.json? top-level comment? not your own? not already DMed?
                                  ├─▶ DM to the commenter   (POST /me/messages  recipient.comment_id)
-                                 └─▶ public reply "Check your DM 📩"  (POST /{comment-id}/replies)
+                                 │   (temporary DM failures are retried 3 more times: after 30 s, 2 min, 10 min)
+                                 └─▶ if the DM succeeded: public reply "Check your DM 📩"  (POST /{comment-id}/replies)
 ```
 
 ## Instagram rules you should know
@@ -38,7 +41,7 @@ Instagram sends a webhook ──▶ this server (/webhook)
 npm install
 cp .env.example .env              # fill in the values
 cp campaigns.example.json campaigns.json
-npm run list-reels                # shows your IG_USER_ID and reel links/IDs
+npm run list-reels                # shows your account ids (use user_id as IG_USER_ID) and reel links/IDs
 ```
 
 Edit `campaigns.json` — one entry per reel:
@@ -58,7 +61,7 @@ Any Node host works — e.g. **Render**, **Railway** or a VPS.
 - Start command: `npm start`
 - Set the variables from `.env` in the host's dashboard.
 - Upload `campaigns.json` (or set `CAMPAIGNS_FILE` to its path).
-- Use a persistent disk for `data/` if you can (it remembers who was DMed and the refreshed token).
+- Use a persistent disk for `data/` if you can (it remembers who was DMed and the refreshed token; the server assumes a single running instance). If `data/state.json` is corrupted the server refuses to start rather than risk re-DMing people.
 
 For local testing you can use a tunnel: `npx localtunnel --port 3000` or `ngrok http 3000`.
 
@@ -75,8 +78,15 @@ Comment on your reel from a tester account — you should get the reply + DM wit
 DRY_RUN=true npm start
 npm run simulate -- <mediaId-from-campaigns.json> "🔥" some_user
 ```
-The server logs what it *would* send.
+The server logs what it *would* send (lines start with `[dry-run]`). Optional extras: a 4th argument is a
+`parentId` (simulates a thread reply, which is ignored), and `SIM_FROM_ID=<id>` overrides the commenter id.
+Only run `simulate` against a `DRY_RUN=true` server. Note that simulate still writes to `data/state.json`.
+The person is marked as DMed *before* the DM is sent, so a crash mid-send won't double-DM but may skip that person.
+If a DM fails with a temporary error (Instagram outage, rate limit, network), the server retries in-process after 30 s, 2 min and 10 min;
+only if all retries fail is the comment forgotten. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
 
 ## Token
-Long-lived tokens last 60 days. The server refreshes it every 24 h and saves it to `data/token.json`.
+Long-lived tokens last 60 days. The server refreshes it about a minute after start and then every 24 h,
+and saves it to `data/token.json` (private file). The saved token remembers which `IG_ACCESS_TOKEN` it came from:
+if you put a different token in `.env`, the new one is used instead of the saved one.
 If the server is off for 60+ days, generate a new token in the Meta dashboard.

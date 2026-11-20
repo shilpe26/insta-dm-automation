@@ -1,9 +1,12 @@
 // Sends a fake, correctly signed "comment" webhook to your local server.
-// Run the server with DRY_RUN=true first, then: npm run simulate -- <mediaId> "comment text" [username]
+// Only use against a server started with DRY_RUN=true.
+// Env SIM_FROM_ID overrides the commenter id (e.g. to test the own-account skip).
+// Run the server with DRY_RUN=true first, then: npm run simulate -- <mediaId> "comment text" [username] [parentId]
 import 'dotenv/config';
 import crypto from 'node:crypto';
 
-const [mediaId = '123', text = 'link please 🔥', username = 'test_user'] = process.argv.slice(2);
+const [mediaId = '123', text = 'link please 🔥', username = 'test_user', parentId] = process.argv.slice(2);
+console.warn('WARNING: use this only against a DRY_RUN=true server, or it may send real DMs.');
 const port = process.env.PORT || 3000;
 const body = JSON.stringify({
   object: 'instagram',
@@ -15,7 +18,8 @@ const body = JSON.stringify({
       value: {
         id: `sim_${Date.now()}`,
         text,
-        from: { id: `uid_${username}`, username },
+        from: { id: process.env.SIM_FROM_ID || `uid_${username}`, username },
+        ...(parentId && { parent_id: parentId }),
         media: { id: mediaId, media_product_type: 'REELS' },
       },
     }],

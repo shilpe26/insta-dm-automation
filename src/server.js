@@ -8,34 +8,84 @@ import { store } from './store.js';
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 // ---------- Campaigns: map reel media ID -> campaign. Reloaded automatically when campaigns.json changes.
+const MEDIA_LOOKUP_CAP = 2000;
+const RETRY_UNRESOLVED_MS = 5 * 60 * 1000;
 let byMediaId = new Map();
-let campaignsMtime = 0;
-let ownUserId = env.igUserId;
+let campaignsMtime = 0; // only set once EVERY campaign resolved
+let triedMtime = 0;
+let lastTry = 0;
+
+// Our own account ids/username, so we never react to our own comments (that would loop forever).
+const ownIds = new Set([env.igUserId].filter(Boolean));
 let ownUsername = '';
+// True only when own ids came from IG_USER_ID or a successful /me call (entry.id alone is not trusted enough).
+let ownVerified = Boolean(env.igUserId);
+let lastMeTry = 0;
+const ME_RETRY_MS = 60 * 1000;
+
+async function loadOwnAccount() {
+  const me = await ig.me();
+  for (const id of [me.id, me.user_id]) if (id) ownIds.add(String(id));
+  ownUsername = (me.username || '').toLowerCase();
+  ownVerified = true;
+  log(`Logged in as @${me.username} (ids: ${[...ownIds].join(', ')})`);
+}
+
+// Fail closed: if our identity is unknown, retry /me (at most once a minute) and otherwise refuse to act.
+async function ensureOwnAccount() {
+  if (env.dryRun || ownVerified) return;
+  if (Date.now() - lastMeTry < ME_RETRY_MS) return;
+  lastMeTry = Date.now();
+  await loadOwnAccount().catch((e) => log('WARNING Could not verify own account:', e.message));
+}
+
+// Delays before retry 1, 2, 3 of a failed DM. Override with RETRY_DELAYS_MS="200,200,200" (e.g. for tests).
+const RETRY_DELAYS_MS = (process.env.RETRY_DELAYS_MS || '30000,120000,600000')
+  .split(',').map((n) => Number(n.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function refreshCampaigns() {
   const mtime = fs.statSync(paths.campaigns).mtimeMs;
   if (mtime === campaignsMtime) return;
+  // File unchanged but some reels were not found: retry at most every 5 minutes.
+  if (mtime === triedMtime && Date.now() - lastTry < RETRY_UNRESOLVED_MS) return;
+  triedMtime = mtime; // set before any await so concurrent webhooks don't repeat the lookup
+  lastTry = Date.now();
+  try {
+    await resolveCampaigns(mtime);
+  } catch (e) {
+    triedMtime = 0; // lookup failed (network/rate limit): let the next webhook retry right away
+    throw e;
+  }
+}
+
+async function resolveCampaigns(mtime) {
   const campaigns = loadCampaigns();
-  const needLookup = campaigns.some((c) => !c.mediaId);
-  const media = needLookup ? await ig.listMedia() : [];
+  const codeOf = (c) => (c.mediaId ? null : shortcodeFromUrl(c.reel));
+  const codes = campaigns.map(codeOf).filter(Boolean);
+  const findHit = (media, code) => media.find((m) => m.shortcode === code || shortcodeFromUrl(m.permalink) === code);
+  const media = codes.length
+    ? await ig.listMedia(MEDIA_LOOKUP_CAP, (items) => codes.every((code) => findHit(items, code)))
+    : [];
+
   const map = new Map();
+  let allResolved = true;
   for (const c of campaigns) {
     let id = c.mediaId;
     if (!id) {
-      const code = shortcodeFromUrl(c.reel);
-      const hit = media.find((m) => m.shortcode === code || shortcodeFromUrl(m.permalink) === code);
+      const hit = findHit(media, codeOf(c));
       if (!hit) {
-        log(`⚠️  Campaign "${c.name}": reel ${c.reel} not found on your account (is it posted from this account?)`);
+        allResolved = false;
+        log(`WARNING Campaign "${c.name}": reel ${c.reel} not found on your account (is it posted from this account?)`);
         continue;
       }
       id = hit.id;
     }
     map.set(String(id), c);
-    log(`✅ Watching "${c.name}" -> media ${id}`);
+    log(`Watching "${c.name}" -> media ${id}`);
   }
   byMediaId = map;
-  campaignsMtime = mtime;
+  if (allResolved) campaignsMtime = mtime;
 }
 
 // ---------- Core logic for one comment
@@ -49,8 +99,14 @@ export async function handleComment(value) {
   const mediaId = String(value.media?.id || '');
   const text = (value.text || '').trim();
 
-  // Never react to our own comments/replies (otherwise we'd loop forever).
-  if (from.id && (from.id === ownUserId || from.username === ownUsername)) return;
+  // Fail closed: without knowing our own account we could reply to ourselves forever.
+  if (!env.dryRun && !ownVerified) {
+    log('ERROR Own account id not verified (set IG_USER_ID or fix the access token); refusing to process comments.');
+    return;
+  }
+  if (!from.id) return;
+  if (value.parent_id) return; // a reply inside a thread; only top-level comments trigger the flow
+  if (ownIds.has(String(from.id)) || (ownUsername && from.username?.toLowerCase() === ownUsername)) return;
 
   const campaign = byMediaId.get(mediaId);
   if (!campaign) return; // not a reel we're automating
@@ -60,28 +116,45 @@ export async function handleComment(value) {
     log(`skip @${from.username}: "${text}" doesn't match keywords`);
     return;
   }
-  if (campaign.oncePerUser && store.userAlreadyDmed(campaign.name, from.id)) {
+  if (campaign.oncePerUser && store.userAlreadyDmed(mediaId, from.id)) {
     store.markComment(commentId, { skipped: 'already-dmed', user: from.username });
     log(`skip @${from.username}: already DMed for "${campaign.name}"`);
     return;
   }
 
-  // Mark first so a webhook retry can't double-send.
+  // Mark comment AND user synchronously, before any await, so retries/concurrent webhooks can't double-send.
   store.markComment(commentId, { campaign: campaign.name, user: from.username, text });
+  if (campaign.oncePerUser) store.markUser(mediaId, from.id);
   const dm = campaign.dm.replaceAll('{username}', from.username || '');
 
-  try {
-    await ig.sendPrivateReply(commentId, dm);
-    store.markUser(campaign.name, from.id);
-    log(`📩 DM sent to @${from.username} ("${text}")`);
-  } catch (e) {
-    log(`❌ DM to @${from.username} failed:`, e.message, e.details ? JSON.stringify(e.details) : '');
+  // The webhook is already acked, so Meta won't redeliver: retry temporary failures ourselves.
+  // Comment and user stay marked while retrying so nothing double-sends.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await ig.sendPrivateReply(commentId, dm);
+      break;
+    } catch (e) {
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (e.retryable && delay !== undefined) {
+        log(`DM to @${from.username} failed (attempt ${attempt + 1}), retrying in ${delay >= 1000 ? Math.round(delay / 1000) + 's' : delay + 'ms'}:`, e.message);
+        await sleep(delay);
+        continue;
+      }
+      if (campaign.oncePerUser) store.unmarkUser(mediaId, from.id);
+      if (e.retryable) store.unmarkComment(commentId); // gave up; a future redelivery may try again
+      else store.markComment(commentId, { campaign: campaign.name, user: from.username, text, error: e.message });
+      log(`DM to @${from.username} failed${e.retryable ? ` after ${attempt + 1} attempts, giving up` : ''}:`, e.message, e.details ? JSON.stringify(e.details) : '');
+      return; // no public "Check your DM" if no DM went out
+    }
   }
+  log(env.dryRun ? `[dry-run] would DM @${from.username} ("${text}")` : `DM sent to @${from.username} ("${text}")`);
+
+  const reply = pick(campaign.publicReplies);
   try {
-    await ig.replyToComment(commentId, pick(campaign.publicReplies));
-    log(`💬 Replied to comment by @${from.username}`);
+    await ig.replyToComment(commentId, reply);
+    log(env.dryRun ? `[dry-run] would reply to @${from.username}: ${reply}` : `Replied to comment by @${from.username}`);
   } catch (e) {
-    log(`❌ Public reply to @${from.username} failed:`, e.message);
+    log(`Public reply to @${from.username} failed:`, e.message);
   }
 }
 
@@ -91,11 +164,17 @@ app.use(express.json({ verify: (req, _res, buf) => (req.rawBody = buf) }));
 
 app.get('/', (_req, res) => res.send('Instagram DM automation is running.'));
 
+// Hash both sides so the comparison is constant-time regardless of length.
+function safeEqual(a, b) {
+  const h = (v) => crypto.createHash('sha256').update(String(v ?? '')).digest();
+  return crypto.timingSafeEqual(h(a), h(b));
+}
+
 // Meta calls this once when you register the webhook URL.
 app.get('/webhook', (req, res) => {
-  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === env.verifyToken) {
+  if (req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], env.verifyToken)) {
     log('Webhook verified by Meta');
-    return res.status(200).send(req.query['hub.challenge']);
+    return res.status(200).type('text/plain').send(String(req.query['hub.challenge'] ?? ''));
   }
   res.sendStatus(403);
 });
@@ -119,29 +198,40 @@ app.post('/webhook', async (req, res) => {
     log('Could not load campaigns:', e.message);
     return;
   }
+  await ensureOwnAccount();
+  const jobs = [];
   for (const entry of req.body.entry || []) {
+    if (entry.id) ownIds.add(String(entry.id)); // webhook entries are addressed to our own account
     for (const change of entry.changes || []) {
       if (change.field === 'comments' || change.field === 'live_comments') {
-        await handleComment(change.value).catch((e) => log('handleComment error:', e.message));
+        // Not awaited one by one: a comment waiting to retry its DM must not hold up the others.
+        jobs.push(handleComment(change.value).catch((e) => log('handleComment error:', e.message)));
       }
     }
   }
+  await Promise.all(jobs);
+});
+
+// Malformed JSON etc.: plain short answer, no stack trace.
+app.use((err, _req, res, _next) => {
+  const status = err.status >= 400 && err.status < 500 ? err.status : 500;
+  res.status(status).type('text/plain').send(status === 500 ? 'Internal Server Error' : 'Bad Request');
 });
 
 // ---------- Startup
 async function start() {
   if (!env.dryRun) {
     try {
-      const me = await ig.me();
-      ownUserId = ownUserId || String(me.user_id);
-      ownUsername = me.username;
-      log(`Logged in as @${me.username} (${ownUserId})`);
+      lastMeTry = Date.now();
+      await loadOwnAccount();
     } catch (e) {
-      log('⚠️  Could not verify access token:', e.message);
+      log('WARNING Could not verify access token:', e.message);
     }
-    // Refresh the long-lived token once a day so it never expires.
-    const refresh = () => ig.refreshToken().then(() => log('🔑 Access token refreshed')).catch((e) => log(e.message));
-    setInterval(refresh, 24 * 60 * 60 * 1000);
+    if (!ownVerified) log('ERROR Own account id unknown (set IG_USER_ID); comments will be ignored until it is known.');
+    // Refresh the long-lived token shortly after startup, then once a day so it never expires.
+    const refresh = () => ig.refreshToken().then(() => log('Access token refreshed')).catch((e) => log(e.message));
+    setTimeout(refresh, 60 * 1000).unref();
+    setInterval(refresh, 24 * 60 * 60 * 1000).unref();
   }
   await refreshCampaigns().catch((e) => log('Could not load campaigns:', e.message));
   app.listen(env.port, () => log(`Listening on :${env.port}  (webhook path: /webhook${env.dryRun ? ', DRY RUN' : ''})`));
