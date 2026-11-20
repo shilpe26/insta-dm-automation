@@ -40,7 +40,7 @@ New Meta apps use **"Instagram API with Unified Login"** (this is the default, `
    - Permissions: `instagram_basic`, `instagram_manage_comments`, `instagram_manage_messages` and `business_management`
 4. **Generate token** and copy it → `IG_ACCESS_TOKEN`. This is a system-user token: it is not refreshed by the server.
 5. **App settings → Basic**: copy the **App secret** → `APP_SECRET` (the old name `INSTAGRAM_APP_SECRET` still works).
-6. **Subscribe the account to the app's webhooks.** After generating the token, open **Configure webhooks** (step 4 below) and make sure
+6. **Subscribe the account to the app's webhooks.** After generating the token, open **Configure webhooks** (see the "Connect the webhook" section below) and make sure
    your Instagram account is subscribed and the **`comments`** field is on. If the dashboard shows a per-account subscribe toggle, turn it on;
    without it Meta sends no comment notifications for that account.
 7. In the Instagram app: **Settings → Privacy → Messages → Connected tools → turn on "Allow access to messages"**.
@@ -101,7 +101,10 @@ The server logs what it *would* send (lines start with `[dry-run]`). Optional ex
 Only run `simulate` against a `DRY_RUN=true` server. Note that simulate still writes to `data/state.json`.
 The person is marked as DMed *before* the DM is sent, so a crash mid-send won't double-DM but may skip that person.
 If a DM fails with a temporary error (Instagram outage, rate limit, network), the server retries in-process after 30 s, 2 min and 10 min;
-only if all retries fail is the comment forgotten. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
+if all retries fail, the comment is forgotten and the person can be DMed again if they comment again.
+The exception is a timeout (or an unreadable reply from Instagram): the DM may have gone out anyway, so the person stays marked as DMed
+(no double DM), and the log shows a line starting with `ACTION NEEDED` so you can check Instagram and DM them manually if needed.
+Connection failures where the request never reached Instagram are not treated this way. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
 
 ## Token
 Unified login: the token is a system-user token with the expiry you chose (**Never**). It cannot be refreshed; the server only logs that once at startup.

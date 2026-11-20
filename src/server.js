@@ -204,7 +204,7 @@ export async function handleComment(value) {
   // The webhook is already acked, so Meta won't redeliver: retry temporary failures ourselves.
   // Comment and user stay marked while retrying so nothing double-sends.
   const heldKey = `${mediaId}:${from.id}`;
-  let ambiguous = false; // an attempt timed out / hit a network error: the DM may have gone out anyway
+  let ambiguous = false; // an attempt timed out (or had an unreadable reply): the DM may have gone out anyway
   for (let attempt = 0; ; attempt++) {
     try {
       await ig.sendPrivateReply(commentId, dm);
@@ -219,7 +219,7 @@ export async function handleComment(value) {
         heldComments.delete(heldKey);
         break;
       }
-      if (e.network) ambiguous = true;
+      if (e.ambiguous) ambiguous = true;
       const delay = RETRY_DELAYS_MS[attempt];
       if (e.retryable && delay !== undefined) {
         log(`DM to @${from.username} failed (attempt ${attempt + 1}), retrying in ${delay >= 1000 ? Math.round(delay / 1000) + 's' : delay + 'ms'}:`, e.message);
@@ -230,6 +230,7 @@ export async function handleComment(value) {
       if (ambiguous) {
         // Fail closed against double-DMs: keep the person and comment marked, and don't replay held comments.
         log(`WARNING @${from.username} may already have received the DM (an earlier attempt timed out); keeping them marked as DMed`);
+        log(`ACTION NEEDED: could not confirm DM to @${from.username} for comment ${commentId} on ${campaign.name}; check Instagram and DM them manually if needed`);
         if (campaign.oncePerUser) store.finishUser(mediaId, from.id);
         heldComments.delete(heldKey);
         return;

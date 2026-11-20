@@ -29,7 +29,7 @@ if (!UNIFIED) try {
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 
 /** `path` is an API path, or a full URL (used for pagination links). */
-async function call(method, path, { query = {}, body } = {}) {
+async function call(method, path, { query = {}, body, detectAlreadySent = false } = {}) {
   const url = new URL(path.startsWith('http') ? path : BASE + path);
   // Pagination links come from API responses; never send our token anywhere but Instagram.
   if (url.protocol !== 'https:' || url.hostname !== HOST) {
@@ -46,10 +46,12 @@ async function call(method, path, { query = {}, body } = {}) {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (e) {
-    // Includes timeouts (TimeoutError): temporary, so retryable.
+    // Network failures are temporary, so retryable.
     const err = new Error(`Instagram API ${label} network error: ${e.message}`);
     err.retryable = true;
-    err.network = true; // outcome unknown: the request may have reached Instagram
+    // Only a timeout leaves the outcome unknown (the request may have reached Instagram).
+    // Connection refused / DNS failures mean it never got there, so they are not ambiguous.
+    err.ambiguous = e?.name === 'TimeoutError' || e?.name === 'AbortError';
     throw err;
   }
   let data;
@@ -63,7 +65,7 @@ async function call(method, path, { query = {}, body } = {}) {
       // 200 but unreadable body (or body read timed out): don't pretend it worked with {}.
       const err = new Error(`Instagram API ${label} returned an unreadable response: ${e.message}`);
       err.retryable = true;
-      err.network = true;
+      err.ambiguous = true; // Instagram answered 200, so the action probably happened
       throw err;
     }
   }
@@ -75,10 +77,15 @@ async function call(method, path, { query = {}, body } = {}) {
     const code = data.error?.code;
     err.retryable =
       res.status >= 500 || res.status === 429 || RATE_LIMIT_CODES.has(code) || code === 2 || data.error?.is_transient === true;
-    // Assumption: Meta signals "this comment already got its private reply" with subcode 1545041 or similar wording.
-    const msg = String(data.error?.message || '');
-    err.alreadySent =
-      data.error?.error_subcode === 1545041 || /already\b.*\b(replied|sent|private reply)|private reply.*already/i.test(msg);
+    if (detectAlreadySent) {
+      // Only a 4xx whose message clearly says a private reply was already sent counts as delivered.
+      const msg = String(data.error?.message || '');
+      const clientError = res.status >= 400 && res.status < 500;
+      const says = /already\s+(been\s+)?(sent|replied)|already\s+(has|have)\s+a\s+private\s+reply/i.test(msg);
+      const other = /deleted|blocked|not\s+found|cannot/i.test(msg);
+      // Subcode 1545041 is UNVERIFIED (an assumption about Meta's "already replied" code); only trusted with a 4xx.
+      err.alreadySent = clientError && !other && (says || data.error?.error_subcode === 1545041);
+    }
     throw err;
   }
   return data;
@@ -138,7 +145,10 @@ export const ig = {
    */
   sendPrivateReply(commentId, text) {
     if (env.dryRun) return;
-    return call('POST', `${owner()}/messages`, { body: { recipient: { comment_id: commentId }, message: { text } } });
+    return call('POST', `${owner()}/messages`, {
+      body: { recipient: { comment_id: commentId }, message: { text } },
+      detectAlreadySent: true,
+    });
   },
 
   /** Long-lived tokens last 60 days; refreshing extends them. Saved to data/token.json. */
