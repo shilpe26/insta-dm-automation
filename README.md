@@ -81,6 +81,22 @@ Any Node host works — e.g. **Render**, **Railway** or a VPS.
 
 For local testing you can use a tunnel: `npx localtunnel --port 3000` or `ngrok http 3000`.
 
+### Deploy to Render (free)
+1. Put this project in a GitHub repository (`.env`, `campaigns.json` and `data/` are git-ignored; never commit them).
+2. In Render choose **New > Blueprint**, pick the repository; Render reads `render.yaml` (free web service, health check `/healthz`).
+3. Fill in the environment variables Render asks for: `APP_SECRET`, `IG_ACCESS_TOKEN`, `IG_USER_ID`, `WEBHOOK_VERIFY_TOKEN`, `OWNER_NAME`, `CONTACT_EMAIL`, and `CAMPAIGNS_JSON`
+   (the whole content of your `campaigns.json`, on one line or pasted as is). Render sets `PORT` itself.
+4. After the deploy, open `https://YOUR-SERVICE.onrender.com/` : you should see the status page with links to the privacy policy, data deletion and terms pages.
+5. In Meta, set the webhook callback URL to `https://YOUR-SERVICE.onrender.com/webhook` with your verify token (see step 4 below).
+6. Ready for Meta App Review? Follow [docs/APP_REVIEW.md](docs/APP_REVIEW.md).
+
+Limits of the free plan:
+- **No persistent disk**: `data/state.json` (the "already DMed" record) is wiped on every restart or redeploy, so a person could get a second DM if they comment again afterwards.
+- The service **sleeps after about 15 minutes without traffic**; the first webhook after a sleep can be slow or delayed while it wakes up. Optional: a free cron service (for example cron-job.org) can request `https://YOUR-SERVICE.onrender.com/healthz` every 10 minutes to keep it awake. Free instance hours are limited, so check Render's current free-plan terms.
+- Changing `CAMPAIGNS_JSON` needs a restart (Render restarts automatically when you save env vars). `CAMPAIGNS_JSON`, if set, is used instead of `campaigns.json`.
+
+The public pages `/privacy`, `/data-deletion` and `/terms` use `OWNER_NAME` and `CONTACT_EMAIL`; the server logs a warning if they are missing.
+
 ### 4. Connect the webhook
 In the Meta app → **Instagram → API setup with Unified login → Configure webhooks**:
 - Callback URL: `https://YOUR-DOMAIN/webhook`

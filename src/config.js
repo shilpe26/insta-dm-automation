@@ -32,21 +32,43 @@ export const env = {
   port: Number(process.env.PORT || 3000),
   graphVersion: process.env.GRAPH_VERSION || (apiMode === 'unified' ? 'v27.0' : 'v23.0'),
   dryRun: process.env.DRY_RUN === 'true',
+  ownerName: (process.env.OWNER_NAME || '').trim(),
+  contactEmail: (process.env.CONTACT_EMAIL || '').trim(),
 };
+
+// CAMPAIGNS_JSON (the whole campaigns JSON as text) wins over the file; useful on hosts without the file (e.g. Render).
+export const campaignsFromEnv = Boolean(process.env.CAMPAIGNS_JSON?.trim());
+
+/** Changes when the campaigns source changes. Env var: constant (nothing to reload). */
+export function campaignsVersion() {
+  return campaignsFromEnv ? 1 : fs.statSync(paths.campaigns).mtimeMs;
+}
 
 export const paths = {
   root,
   campaigns: process.env.CAMPAIGNS_FILE || path.join(root, 'campaigns.json'),
-  state: path.join(root, 'data', 'state.json'),
+  // STATE_FILE is optional (e.g. to keep tests away from the real data folder).
+  state: process.env.STATE_FILE || path.join(root, 'data', 'state.json'),
   token: path.join(root, 'data', 'token.json'),
 };
 
 export function loadCampaigns() {
-  if (!fs.existsSync(paths.campaigns)) {
-    throw new Error(`No campaigns file at ${paths.campaigns}. Copy campaigns.example.json to campaigns.json and edit it.`);
+  let raw;
+  if (campaignsFromEnv) {
+    raw = process.env.CAMPAIGNS_JSON;
+  } else {
+    if (!fs.existsSync(paths.campaigns)) {
+      throw new Error(`No campaigns file at ${paths.campaigns}. Copy campaigns.example.json to campaigns.json and edit it (or set CAMPAIGNS_JSON).`);
+    }
+    raw = fs.readFileSync(paths.campaigns, 'utf8');
   }
-  const { campaigns } = JSON.parse(fs.readFileSync(paths.campaigns, 'utf8'));
-  if (!Array.isArray(campaigns) || campaigns.length === 0) throw new Error('campaigns.json has no campaigns');
+  let campaigns;
+  try {
+    ({ campaigns } = JSON.parse(raw));
+  } catch (e) {
+    throw new Error(`Campaigns JSON is not valid (${campaignsFromEnv ? 'CAMPAIGNS_JSON' : paths.campaigns}): ${e.message}`);
+  }
+  if (!Array.isArray(campaigns) || campaigns.length === 0) throw new Error('Campaigns JSON has no campaigns');
   for (const c of campaigns) {
     if (!c.reel && !c.mediaId) throw new Error(`Campaign "${c.name}" needs "reel" (URL) or "mediaId"`);
     if (!c.dm) throw new Error(`Campaign "${c.name}" needs a "dm" message`);

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: insta-dm-automation
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_SECRET
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: IG_USER_ID
+        sync: false
+      - key: WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: OWNER_NAME
+        sync: false
+      - key: CONTACT_EMAIL
+        sync: false
+      - key: CAMPAIGNS_JSON
+        sync: false

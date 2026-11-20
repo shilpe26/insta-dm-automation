@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import { env, paths, loadCampaigns, shortcodeFromUrl } from './config.js';
+import { env, campaignsVersion, loadCampaigns, shortcodeFromUrl } from './config.js';
+import { registerPages, warnIfPlaceholders } from './pages.js';
 import { ig } from './instagram.js';
 import { store } from './store.js';
 
@@ -93,7 +93,7 @@ function refreshCampaigns() {
 }
 
 async function refreshCampaignsOnce() {
-  const mtime = fs.statSync(paths.campaigns).mtimeMs;
+  const mtime = campaignsVersion();
   if (mtime === campaignsMtime) return;
   // File unchanged but some reels were not found: retry at most every 5 minutes.
   if (mtime === triedMtime && Date.now() - lastTry < RETRY_UNRESOLVED_MS) return;
@@ -263,7 +263,7 @@ export async function handleComment(value) {
 const app = express();
 app.use(express.json({ verify: (req, _res, buf) => (req.rawBody = buf) }));
 
-app.get('/', (_req, res) => res.send('Instagram DM automation is running.'));
+registerPages(app);
 
 // Hash both sides so the comparison is constant-time regardless of length.
 function safeEqual(a, b) {
@@ -345,6 +345,7 @@ async function start() {
     setInterval(refresh, 24 * 60 * 60 * 1000).unref();
   }
   await refreshCampaigns().catch((e) => log('Could not load campaigns:', e.message));
+  warnIfPlaceholders(log);
   app.listen(env.port, () => log(`Listening on :${env.port}  (webhook path: /webhook${env.dryRun ? ', DRY RUN' : ''})`));
 }
 start();
