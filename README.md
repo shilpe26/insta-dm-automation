@@ -123,7 +123,9 @@ The exception is a timeout (or an unreadable reply from Instagram): the DM may h
 (no double DM), and the log shows a line starting with `ACTION NEEDED` so you can check Instagram and DM them manually if needed.
 Failures where the connection could not even be opened (e.g. no internet, DNS failure) are not treated this way; a dropped connection or timeout is. (Set `RETRY_DELAYS_MS=200,200,200` to use other delays, e.g. in tests.)
 The public "Check your DM" reply is retried the same way (same delays, in the background) when it fails with a temporary error; permanent errors are not retried.
-If an attempt was inconclusive (timeout etc.), the server first looks for its own reply under the comment and does not post a second one; if it cannot check, it gives up and logs `ACTION NEEDED: could not confirm public reply ...`.
+A public reply counts as "inconclusive" (it may have been posted anyway) after a timeout or unreadable answer, a server error (5xx), or a temporary Instagram error; rate-limit answers (429 and similar) are not inconclusive.
+After an inconclusive attempt the server first looks for its own reply under the comment and does not post a second one; the same check runs once more before giving up. If it cannot check (or there are too many replies to check), it stops and logs `ACTION NEEDED: could not confirm public reply ...`.
+Notes: retries are kept in memory, so they are lost if the server restarts or is redeployed. The check needs the account's username to be loaded. If your own account already has a reply under a comment (even one you wrote by hand), the bot treats it as its own and skips its public reply.
 
 ## Handling a data-deletion request
 When someone asks (by email or DM, see `/data-deletion`) to have their data deleted, do this within 30 days:

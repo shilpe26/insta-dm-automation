@@ -147,20 +147,22 @@ export const ig = {
   },
 
   /** Replies under a comment (first page(s)), used to see whether our own public reply already exists. */
-  async listReplies(commentId) {
+  async listReplies(commentId, isMine = () => false) {
     const out = [];
     let fields = 'id,username,from';
     let page;
     try {
-      page = await call('GET', `/${commentId}/replies`, { query: { fields } });
+      page = await call('GET', `/${commentId}/replies`, { query: { fields, limit: '100' } });
     } catch (e) {
       if (e.retryable || e.status === undefined) throw e;
       fields = 'id,text,username'; // this API version may not expose `from`
-      page = await call('GET', `/${commentId}/replies`, { query: { fields } });
+      page = await call('GET', `/${commentId}/replies`, { query: { fields, limit: '100' } });
     }
-    for (let i = 0; page && i < 5; i++) {
+    // Fail closed: if we run out of pages while more exist and none of ours was seen, we can't say "no reply of ours".
+    for (let i = 0; page; i++) {
       out.push(...(page.data || []));
-      if (!page.paging?.next) break;
+      if ((page.data || []).some(isMine) || !page.paging?.next) break;
+      if (i >= 4) throw new Error('too many replies to check');
       page = await call('GET', page.paging.next);
     }
     return out;

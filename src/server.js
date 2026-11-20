@@ -257,35 +257,52 @@ export async function handleComment(value) {
 async function ownReplyExists(commentId) {
   // Matching by username needs our username; without it (or any id match) "not found" would be unreliable.
   if (!usernameLoaded) throw new Error('own username unknown');
-  const replies = await ig.listReplies(commentId);
-  return replies.some((r) => (r.from?.id && ownIds.has(String(r.from.id))) || (r.username && r.username.toLowerCase() === ownUsername));
+  const isOurs = (r) => (r.from?.id && ownIds.has(String(r.from.id))) || (r.username && r.username.toLowerCase() === ownUsername);
+  const replies = await ig.listReplies(commentId, isOurs);
+  return replies.some(isOurs);
 }
+
+// A failed public reply is "inconclusive" (it may still have been posted) on timeouts/unreadable answers, server errors,
+// Meta error codes 1/2 and transient errors. 429 and rate-limit codes mean Meta refused it, so no check is needed.
+const replyInconclusive = (e) =>
+  e.ambiguous === true || e.status >= 500 || e.details?.code === 1 || e.details?.code === 2 || e.details?.is_transient === true;
 
 // Public "Check your DM" reply. Retried like DMs on temporary errors (same RETRY_DELAYS_MS), in the background of
 // the webhook so other comments aren't held up. Never posts twice: after an inconclusive attempt, look for our own reply first.
 async function replyPublicly(commentId, reply, user) {
   let ambiguous = false; // an earlier attempt may have posted the reply even though it reported an error
+  // true = our reply exists; false = none found; throws if it can't be determined
+  const exists = async () => {
+    if (!(await ownReplyExists(commentId))) return false;
+    log(`Public reply to @${user} already exists on comment ${commentId}; not posting again`);
+    return true;
+  };
   for (let attempt = 0; ; attempt++) {
     try {
       await ig.replyToComment(commentId, reply);
       log(env.dryRun ? `[dry-run] would reply to @${user}: ${reply}` : `Replied to comment by @${user}${attempt ? ` (attempt ${attempt + 1})` : ''}`);
       return;
     } catch (e) {
-      if (e.ambiguous) ambiguous = true;
+      if (replyInconclusive(e)) ambiguous = true;
       const delay = RETRY_DELAYS_MS[attempt];
       if (!e.retryable || delay === undefined) {
         log(`Public reply to @${user} failed${e.retryable ? ` after ${attempt + 1} attempts, giving up` : ' (permanent error, not retrying)'}:`, e.message, e.details ? JSON.stringify(e.details) : '');
-        if (ambiguous) log(`ACTION NEEDED: could not confirm public reply to @${user} on comment ${commentId}`);
+        if (ambiguous) {
+          // Last look before giving up: an inconclusive attempt may have posted it.
+          try {
+            if (await exists()) return;
+          } catch (ce) {
+            log(`Could not check for an existing public reply to @${user}:`, ce.message);
+          }
+          log(`ACTION NEEDED: could not confirm public reply to @${user} on comment ${commentId}`);
+        }
         return;
       }
       log(`Public reply to @${user} failed (attempt ${attempt + 1}), retrying in ${delay >= 1000 ? Math.round(delay / 1000) + 's' : delay + 'ms'}:`, e.message);
       await sleep(delay);
       if (ambiguous) {
         try {
-          if (await ownReplyExists(commentId)) {
-            log(`Public reply to @${user} already exists on comment ${commentId}; not posting again`);
-            return;
-          }
+          if (await exists()) return;
           log(`Public reply to @${user}: no reply of ours found on comment ${commentId}, retrying`);
         } catch (ce) {
           // Fail closed against a double reply: can't tell whether it posted, so stop.
