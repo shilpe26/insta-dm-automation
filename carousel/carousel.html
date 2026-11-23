@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weekend AI Carousel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<style>
+  :root {
+    --yellow: #FFE873;
+    --yellow-soft: #FFF6C2;
+    --green: #C9F0C4;
+    --green-soft: #E9FAE5;
+    --pink: #FFD3DE;
+    --pink-soft: #FFEDF2;
+    --orange: #FFD3A8;
+    --orange-soft: #FFEBD8;
+    --ink: #1E1A16;
+    --ink-2: #4A433C;
+    --paper: #FFFDF8;
+    --line: 3px solid var(--ink);
+    --shadow: 6px 6px 0 var(--ink);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #e9e4da; }
+  body { font-family: "DM Sans", "Avenir Next", system-ui, sans-serif; color: var(--ink); }
+
+  .slide {
+    width: 1080px; height: 1350px; position: relative; overflow: hidden;
+    padding: 88px 84px 0; display: flex; flex-direction: column;
+    margin: 0 auto 40px;
+  }
+  body.single .slide { display: none; margin: 0; }
+  body.single .slide.on { display: flex; }
+
+  .bg-yellow { background: var(--yellow); }
+  .bg-green  { background: var(--green); }
+  .bg-pink   { background: var(--pink); }
+  .bg-orange { background: var(--orange); }
+
+  /* soft decorative blobs */
+  .blob { position: absolute; border-radius: 50%; z-index: 0; }
+  .slide > *:not(.blob):not(.foot) { position: relative; z-index: 1; }
+
+  .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 56px; }
+  .tag {
+    font: 700 24px/1 "DM Sans", sans-serif; letter-spacing: .08em; text-transform: uppercase;
+    background: var(--paper); border: var(--line); border-radius: 999px; padding: 14px 24px;
+  }
+  .count { font: 500 24px/1 "JetBrains Mono", monospace; color: var(--ink-2); }
+
+  h1, h2 { font-family: "Bricolage Grotesque", "Avenir Next", sans-serif; letter-spacing: -0.03em; line-height: .98; }
+  h1 { font-size: 112px; font-weight: 800; }
+  h2 { font-size: 84px; font-weight: 800; margin-bottom: 22px; }
+  .lead { font-size: 36px; line-height: 1.35; color: var(--ink-2); max-width: 880px; }
+  .hl { background: var(--paper); border: var(--line); border-radius: 18px; padding: 0 16px; display: inline-block; transform: rotate(-1.5deg); }
+
+  .foot {
+    position: absolute; left: 84px; right: 84px; bottom: 52px;
+    display: flex; justify-content: space-between; align-items: center;
+    font: 500 22px/1 "DM Sans", sans-serif; color: var(--ink-2); z-index: 2;
+  }
+  .handle { font-weight: 700; color: var(--ink); opacity: .75; }
+  .swipe { font-weight: 700; color: var(--ink); }
+
+  .card {
+    background: var(--paper); border: var(--line); border-radius: 28px; box-shadow: var(--shadow);
+  }
+
+  /* ---------- slide 1 ---------- */
+  .chat { margin-top: 60px; padding: 40px; display: flex; flex-direction: column; gap: 22px; }
+  .row { display: flex; gap: 18px; align-items: flex-start; }
+  .row.right { justify-content: flex-end; }
+  .av { width: 64px; height: 64px; border-radius: 50%; border: var(--line); flex: none; display: grid; place-items: center; font-size: 30px; }
+  .bubble { border: var(--line); border-radius: 26px; padding: 20px 26px; font-size: 32px; line-height: 1.3; max-width: 640px; }
+  .bubble small { display: block; font-size: 22px; font-weight: 700; color: var(--ink-2); margin-bottom: 6px; }
+  .arrow-note { text-align: center; font: 700 24px/1 "JetBrains Mono", monospace; color: var(--ink-2); }
+
+  /* ---------- steps ---------- */
+  .steps { display: flex; flex-direction: column; gap: 30px; margin-top: 56px; }
+  .step { display: flex; gap: 28px; align-items: center; padding: 42px 36px; }
+  .num {
+    flex: none; width: 84px; height: 84px; border-radius: 22px; border: var(--line);
+    display: grid; place-items: center; font: 800 42px/1 "Bricolage Grotesque", sans-serif;
+  }
+  .step h3 { font: 700 38px/1.15 "Bricolage Grotesque", sans-serif; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .step p { font-size: 28px; line-height: 1.35; color: var(--ink-2); }
+
+  .note {
+    margin-top: 48px; display: inline-flex; gap: 14px; align-items: center; align-self: flex-start;
+    background: var(--ink); color: var(--paper); border-radius: 999px; padding: 18px 30px; font-size: 27px; font-weight: 500;
+  }
+
+  /* ---------- tools grid ---------- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 52px; }
+  .tool { padding: 36px 30px; display: flex; gap: 22px; align-items: center; min-height: 176px; }
+  .ic { flex: none; width: 84px; height: 84px; border-radius: 20px; border: var(--line); display: grid; place-items: center; font-size: 38px; }
+  .tool b { display: block; font: 700 34px/1.1 "Bricolage Grotesque", sans-serif; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .tool span { font-size: 25px; line-height: 1.3; color: var(--ink-2); }
+
+  /* ---------- checklist ---------- */
+  .list { display: flex; flex-direction: column; gap: 28px; margin-top: 56px; }
+  .li { display: flex; gap: 28px; align-items: center; padding: 38px 34px; }
+  .tick { flex: none; width: 76px; height: 76px; border-radius: 20px; border: var(--line); display: grid; place-items: center; font: 800 36px/1 "Bricolage Grotesque", sans-serif; }
+  .li b { font: 700 36px/1.2 "Bricolage Grotesque", sans-serif; letter-spacing: -0.01em; }
+  .li p { font-size: 27px; line-height: 1.35; color: var(--ink-2); margin-top: 4px; }
+  code, .mono { font-family: "JetBrains Mono", monospace; font-size: .86em; background: var(--yellow-soft); border-radius: 8px; padding: 2px 8px; }
+
+  /* ---------- flow ---------- */
+  .flow { margin-top: 52px; display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+  .node { padding: 34px 32px; font-size: 29px; display: flex; align-items: center; gap: 18px; }
+  .node .ic { width: 76px; height: 76px; font-size: 36px; border-radius: 16px; }
+  .node b { font: 700 36px/1.15 "Bricolage Grotesque", sans-serif; }
+  .node span { display: block; font-size: 25px; color: var(--ink-2); margin-top: 3px; }
+  .down { height: 64px; display: grid; place-items: center; font: 800 30px/1 "DM Sans"; }
+  .checks { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+  .chip { font-size: 22px; font-weight: 700; border: 2px solid var(--ink); border-radius: 999px; padding: 7px 14px; background: var(--green-soft); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  /* ---------- CTA ---------- */
+  .big-card { margin-top: 64px; padding: 52px 52px; }
+  .big-card .line { display: flex; gap: 28px; align-items: center; font-size: 40px; line-height: 1.3; padding: 30px 0; }
+  .big-card .line + .line { border-top: 2px dashed rgba(30,26,22,.35); }
+  .big-card .line .ic { width: 84px; height: 84px; }
+  .stickers { display: flex; gap: 18px; margin-top: 64px; flex-wrap: wrap; }
+  .sticker { border: var(--line); border-radius: 999px; padding: 16px 28px; font: 700 28px/1 "DM Sans"; box-shadow: 4px 4px 0 var(--ink); }
+  .tight .list { gap: 24px; margin-top: 48px; }
+  .tight .li { padding: 30px 34px; }
+</style>
+</head>
+<body>
+
+<!-- 1. COVER -->
+<section class="slide bg-yellow">
+  <div class="blob" style="width:520px;height:520px;background:var(--pink);right:-180px;top:-160px"></div>
+  <div class="blob" style="width:360px;height:360px;background:var(--green);left:-140px;bottom:120px"></div>
+  <div class="top"><span class="tag">✨ Explore AI this weekend</span><span class="count">01 / 07</span></div>
+  <h1>I built my own <span class="hl">Instagram DM</span> bot in one weekend</h1>
+  <p class="lead" style="margin-top:34px">Comment on my reel → a DM lands in your inbox. Here's exactly how, plus every tool I used.</p>
+
+  <div class="card chat" style="margin-top:72px;padding:48px">
+    <div class="row">
+      <div class="av" style="background:var(--orange)">🙋</div>
+      <div class="bubble" style="background:var(--orange-soft)"><small>@you · comment</small>🔥🔥 link please!</div>
+    </div>
+    <div class="arrow-note">↓ seconds later ↓</div>
+    <div class="row right">
+      <div class="bubble" style="background:var(--green-soft)"><small>DM from @shilpe.codes</small>Hey! Here's your link ✨</div>
+      <div class="av" style="background:var(--green)">🤖</div>
+    </div>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 2. THE IDEA -->
+<section class="slide bg-green">
+  <div class="blob" style="width:460px;height:460px;background:var(--yellow);right:-200px;bottom:-120px"></div>
+  <div class="top"><span class="tag">💡 The idea</span><span class="count">02 / 07</span></div>
+  <h2>What the bot does</h2>
+  <p class="lead">No more replying to 200 "link pls" comments by hand.</p>
+
+  <div class="steps">
+    <div class="card step">
+      <div class="num" style="background:var(--yellow)">1</div>
+      <div><h3>Someone comments on my reel</h3><p>Any word or emoji. Even just "🔥".</p></div>
+    </div>
+    <div class="card step">
+      <div class="num" style="background:var(--pink)">2</div>
+      <div><h3>The bot DMs them instantly</h3><p>With the link or message I wrote for that reel.</p></div>
+    </div>
+    <div class="card step">
+      <div class="num" style="background:var(--orange)">3</div>
+      <div><h3>Then replies "Check your DM 📩"</h3><p>Publicly, only after the DM really went out.</p></div>
+    </div>
+  </div>
+
+  <div class="note">🛡️ Uses Instagram's official API, so there's no ban risk</div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 3. TOOLKIT -->
+<section class="slide bg-pink">
+  <div class="blob" style="width:420px;height:420px;background:var(--orange);left:-180px;top:-140px"></div>
+  <div class="top"><span class="tag">🧰 The toolkit</span><span class="count">03 / 07</span></div>
+  <h2>Everything I used</h2>
+  <p class="lead">All free to start. AI did the heavy lifting on the code.</p>
+
+  <div class="grid">
+    <div class="card tool"><div class="ic" style="background:var(--yellow)">🤖</div><div><b>Claude Code</b><span>My AI pair-programmer</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--green);font:800 30px/1 'Bricolage Grotesque'">JS</div><div><b>Node.js</b><span>Runs the bot</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--orange)">⚡</div><div><b>Express</b><span>Tiny web server</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--pink-soft)">📸</div><div><b>Instagram API</b><span>Comments + private replies</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--green-soft)">🔔</div><div><b>Meta Webhooks</b><span>Pings me on new comments</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--yellow-soft)">☁️</div><div><b>Render</b><span>Free hosting, 24/7</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--orange-soft)">🐙</div><div><b>GitHub</b><span>Code + 1-click deploy</span></div></div>
+    <div class="card tool"><div class="ic" style="background:var(--yellow)">💻</div><div><b>VS Code</b><span>Where it all happened</span></div></div>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 4. SATURDAY AM: META SETUP -->
+<section class="slide bg-orange">
+  <div class="blob" style="width:480px;height:480px;background:var(--yellow);right:-200px;top:-180px"></div>
+  <div class="top"><span class="tag">☀️ Saturday morning</span><span class="count">04 / 07</span></div>
+  <h2>Set up Meta (no code yet)</h2>
+
+  <div class="list">
+    <div class="card li"><div class="tick" style="background:var(--green)">1</div><div><b>Switch to a Professional account</b><p>Creator or Business, and link it to a Meta business portfolio.</p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--pink)">2</div><div><b>Create a Meta app</b><p>Use case: "Manage messaging &amp; content on Instagram"</p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--yellow)">3</div><div><b>Generate an access token</b><p><code>instagram_manage_comments</code> · <code>instagram_manage_messages</code> · <code>instagram_basic</code> · <code>business_management</code></p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--orange-soft)">4</div><div><b>Allow access to messages</b><p>Instagram app → Settings → Messages → Connected tools</p></div></div>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 5. SATURDAY PM: BUILD WITH AI -->
+<section class="slide bg-yellow">
+  <div class="blob" style="width:440px;height:440px;background:var(--green);left:-200px;bottom:-60px"></div>
+  <div class="top"><span class="tag">🛠️ Saturday afternoon</span><span class="count">05 / 07</span></div>
+  <h2>Build it with AI</h2>
+  <p class="lead">I explained the idea in plain English and Claude Code wrote the server with me.</p>
+
+  <div class="flow">
+    <div class="card node"><div class="ic" style="background:var(--pink)">💬</div><div><b>New comment on my reel</b><span>Instagram sends a webhook to my server</span></div></div>
+    <div class="down">↓</div>
+    <div class="card node" style="display:block">
+      <div style="display:flex;gap:18px;align-items:center"><div class="ic" style="background:var(--green)">🧠</div><div><b>The server checks</b></div></div>
+      <div class="checks">
+        <span class="chip">Right reel?</span><span class="chip">Top-level comment?</span><span class="chip">Not my own?</span><span class="chip">Not already DMed?</span>
+      </div>
+    </div>
+    <div class="down">↓</div>
+    <div class="split">
+      <div class="card node"><div class="ic" style="background:var(--orange)">📩</div><div><b>Send the DM</b><span>Private reply</span></div></div>
+      <div class="card node"><div class="ic" style="background:var(--yellow)">💛</div><div><b>Reply publicly</b><span>"Check your DM"</span></div></div>
+    </div>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 6. SUNDAY: TEST + SHIP -->
+<section class="slide bg-green tight">
+  <div class="blob" style="width:460px;height:460px;background:var(--pink);right:-200px;top:-160px"></div>
+  <div class="top"><span class="tag">🚀 Sunday</span><span class="count">06 / 07</span></div>
+  <h2>Make it solid, then ship</h2>
+
+  <div class="list">
+    <div class="card li"><div class="tick" style="background:var(--yellow)">🧪</div><div><b>Test without Instagram</b><p>A dry-run mode plus a fake-comment script, so nothing real gets sent.</p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--pink)">🔁</div><div><b>No double DMs, ever</b><p>It remembers who got a DM and retries failures after 30s, 2 min and 10 min.</p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--orange)">☁️</div><div><b>Deploy free on Render</b><p>Push to GitHub → Blueprint deploy → paste the webhook URL into Meta.</p></div></div>
+    <div class="card li"><div class="tick" style="background:var(--green-soft)">✅</div><div><b>Go live for everyone</b><p>Add privacy, terms and data-deletion pages, then submit Meta App Review.</p></div></div>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Swipe →</span></div>
+</section>
+
+<!-- 7. CTA -->
+<section class="slide bg-pink">
+  <div class="blob" style="width:520px;height:520px;background:var(--yellow);left:-220px;bottom:-200px"></div>
+  <div class="blob" style="width:300px;height:300px;background:var(--orange);right:-90px;top:200px"></div>
+  <div class="top"><span class="tag">🌱 Your turn</span><span class="count">07 / 07</span></div>
+  <h1 style="font-size:100px">Your weekend <span class="hl">AI project</span> starts now</h1>
+
+  <div class="card big-card">
+    <div class="line"><div class="ic" style="background:var(--yellow)">🎯</div><div>Pick one boring task you repeat</div></div>
+    <div class="line"><div class="ic" style="background:var(--green)">🗣️</div><div>Describe it to an AI in plain words</div></div>
+    <div class="line"><div class="ic" style="background:var(--orange)">🚢</div><div>Build, test and ship it by Sunday</div></div>
+  </div>
+
+  <div class="stickers">
+    <span class="sticker" style="background:var(--yellow)">📌 Save this</span>
+    <span class="sticker" style="background:var(--green)">↗ Send to a builder friend</span>
+  </div>
+
+  <div class="foot"><span class="handle">@shilpe.codes</span><span class="swipe">Follow for more weekend AI ✨</span></div>
+</section>
+
+<script>
+  const s = new URLSearchParams(location.search).get('s');
+  if (s) {
+    document.body.classList.add('single');
+    document.querySelectorAll('.slide')[Number(s) - 1].classList.add('on');
+  }
+</script>
+</body>
+</html>
